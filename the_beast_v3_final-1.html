@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Beast - v3 Final (The Perceiver)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+    <!--
+    ============================================================================
+    THE BEAST - v3 FINAL  (research prototype, 5-minute live-demo build)
+
+    Research claim under test:
+      "Perceived intelligence tracks the apparent model of the observer -
+       not the opacity of the computation."
+    The hidden engine underneath is the exact same Flip 7 probability machine
+    as v2. What changed is what the observer is invited to MODEL about the
+    beast. The four modules below let the observer build a richer,
+    "perceiver-like" model of it - without ever exposing a number:
+
+      1. MODULE: VEIL      - metaphorical state instead of a numeric HUD.
+         A risk-scaled halo (glow) replaces the risk reading; warm "soul"
+         motes replace the tribute count; a cool drifting trail replaces the
+         banked total. Meaning without arithmetic.
+
+      2. MODULE: MEMORY    - in-session behavioral continuity (resets on
+         reload, nothing stored). The beast aggregates your habits (early
+         flees, deep feeds, deaths), derives a persona (COWARD / GLUTTON /
+         NEUTRAL) that subtly changes its body, breath, eyes and posture,
+         and keeps a scar for every time it ate you.
+
+      3. MODULE: PREDICTION- the uncanny mirror. Models your MOTION only -
+         never your clicks - and answers with dilated tracking eyes, a lean
+         toward you, breathing entangled with your movement, and a
+         breath-hold when you suddenly stop.
+
+      4. MODULE: SPEECH    - inferred language. Seven short metaphorical
+         lines ("You always run." / "Glutton." / "You're trembling." ...)
+         fire only when your behavior justifies them; otherwise the beast
+         is silent. Silence is part of the design.
+
+    INTEGRITY: the modules may READ engine state and may modify PRESENTATION
+    parameters only. The 78-card asymmetric Flip 7 deck, pop-on-feed,
+    duplicate -> CONSUMED / unique -> safe + value, risk = lethal/remaining,
+    flee -> bank: all untouched. No audio. No kill-timers. No numbers in UI.
+    ============================================================================
+    -->
+</head>
+<body>
+    <script>
+        // =====================================================================
+        // ===== HIDDEN LOGIC ENGINE (Flip 7) — MUST STAY UNTOUCHED =====
+        // =====================================================================
+        // INTEGRITY RULE (research constraint): the modules VEIL / MEMORY /
+        // PREDICTION / SPEECH may READ this engine's state (hiddenRisk,
+        // consumedItems, totalSoulsBanked, currentValue, gameState) and may
+        // modify PRESENTATION parameters only (radius scale, breath rate,
+        // eye rendering, colors, particles, text, position). They must NEVER
+        // modify hiddenDeck, hiddenRisk, currentValue, totalSoulsBanked, or
+        // the rules inside feedBeast() / fleeAndBank().
+        let hiddenDeck = [];
+        let consumedItems = [];
+        let hiddenRisk = 0; // 0.0 to 1.0 (Percentage chance of death)
+        let totalSoulsBanked = 0;
+        let currentValue = 0;
+        let gameState = 'IDLE'; // IDLE, FEEDING, CONSUMED, ESCAPED
+
+        // --- VISUAL/BEHAVIORAL MAPPING VARS (declared here as in the base; written only by RENDER) ---
+        let breathPhase = 0;
+        let currentRadius = 50;
+        let targetRadius = 50;
+        let envDarkness = 0;
+        let shakeIntensity = 0;
+
+        function initializeSystem() {
+            hiddenDeck = [];
+            // Asymmetrical Flip 7 distribution
+            for (let i = 1; i <= 12; i++) {
+                for (let j = 0; j < i; j++) {
+                    hiddenDeck.push(i);
+                }
+            }
+            // Shuffle
+            for (let i = hiddenDeck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [hiddenDeck[i], hiddenDeck[j]] = [hiddenDeck[j], hiddenDeck[i]];
+            }
+            consumedItems = [];
+            currentValue = 0;
+            gameState = 'FEEDING';
+            calculateHiddenRisk();
+        }
+
+        function calculateHiddenRisk() {
+            if (hiddenDeck.length === 0) {
+                hiddenRisk = 0;
+                return;
+            }
+            let lethalCount = 0;
+            hiddenDeck.forEach(item => {
+                if (consumedItems.includes(item)) lethalCount++;
+            });
+            // Normalize risk to a 0.0 - 1.0 float to drive animations
+            hiddenRisk = lethalCount / hiddenDeck.length;
+
+            // Map risk to physical behaviors
+            targetRadius = 100 + (hiddenRisk * 300);
+            envDarkness = hiddenRisk * 255;
+            shakeIntensity = hiddenRisk > 0.4 ? (hiddenRisk * 15) : 0;
+        }
+
+        function feedBeast() {
+            if (gameState !== 'FEEDING') {
+                initializeSystem();
+                return;
+            }
+            if (hiddenDeck.length === 0) return;
+
+            const pulledItem = hiddenDeck.pop();
+
+            if (consumedItems.includes(pulledItem)) {
+                // FATAL COLLISION - THE BEAST ATTACKS
+                gameState = 'CONSUMED';
+                consumedItems.push(pulledItem);
+                currentValue = 0;
+                hiddenRisk = 1.0;
+                targetRadius = width; // Envelops the screen
+                shakeIntensity = 30;
+            } else {
+                // SAFE - THE BEAST ACCEPTS THE TRIBUTE
+                consumedItems.push(pulledItem);
+                currentValue += pulledItem;
+                calculateHiddenRisk();
+            }
+        }
+
+        function fleeAndBank() {
+            if (gameState !== 'FEEDING' || consumedItems.length === 0) return;
+            totalSoulsBanked += currentValue;
+            gameState = 'ESCAPED';
+            targetRadius = 50; // Beast calms down/shrinks
+            hiddenRisk = 0;
+            envDarkness = 0;
+            shakeIntensity = 0;
+        }
+        // =====================================================================
+        // ===== TUNING (all effect intensities live here) =====
+        // =====================================================================
+        // Every "how much" in the four modules lives in this block. If the
+        // live demo feels too strong or too faint, adjust numbers here only.
+
+        // ----- VEIL -----
+        const HALO_LAYERS = 3;              // concentric glow rings
+        const HALO_ALPHA_MIN = 6;           // halo peak alpha at risk 0 (nearly invisible)
+        const HALO_ALPHA_MAX = 170;         // halo peak alpha at risk 1 (strong crimson pulse)
+        const HALO_PULSE_CALM = 0.015;      // halo phase advance per frame at risk 0
+        const HALO_PULSE_RISK = 0.09;       // extra phase advance per frame at risk 1
+        const HALO_SWELL_CALM = 0.06;       // halo radius swell fraction at risk 0
+        const HALO_SWELL_RISK = 0.30;       // halo radius swell fraction at risk 1
+        const SOUL_CURRENT_MAX = 24;        // cap: current tribute motes (count ~ consumedItems.length)
+        const SOUL_SPAWN_PER_FRAME = 1;     // tribute motes materializing per frame
+        const SOUL_ALPHA_MAX = 150;         // warm tribute mote peak alpha
+        const SOUL_DRIFT_PX = 14;           // Perlin drift amplitude of tribute motes
+        const SOUL_BANKED_MAX = 40;         // cap: banked trail particles
+        const SOUL_BANKED_SPAWN_PER_FRAME = 2;
+        const SOUL_BANKED_LOG_K = 8;        // log-like scale: count ~ ln(1 + banked) * K
+        const SOUL_BANKED_ALPHA = 55;       // cool banked mote peak alpha (faint)
+        const SOUL_FADE_RATE = 0.06;        // per-frame alpha easing on spawn/despawn
+        const DEATH_BURST_EXTRA = 8;        // additional scatter motes on CONSUMED
+        const DEATH_BURST_DECAY = 3.2;      // per-frame alpha loss of burst motes
+        const PARTICLE_HARD_CAP = 80;       // max total live particles across all veils
+
+        // ----- MEMORY -----
+        const DEEP_FEED_RISK = 0.5;         // a feed made above this risk is a "deep feed"
+        const EARLY_FLEE_RISK = 0.25;       // a flee below this risk is an "early flee"
+        const EARLY_FLEE_MAX_FEEDS = 2;     // ...or a flee with fewer feeds than this
+        const COWARD_EARLY_FLEES = 2;       // >= this many early flees AND no deep feeds -> COWARD
+        const GLUTTON_DEATHS = 1;           // >= this many deaths ... -> GLUTTON
+        const GLUTTON_DEEP_FEEDS = 3;       // ... or >= this many deep feeds -> GLUTTON
+        const GLUTTON_DEATH_LONG_FEEDS = 3; // death after at least this many feeds = "long" death
+        const COWARD_RADIUS_SCALE = 0.85;
+        const COWARD_BREATH_RATE = 0.7;     // slower, dismissive breath
+        const COWARD_EYE_SQUISH = 0.55;     // half-lidded eyes
+        const COWARD_PERLIN_AMP = 0.7;
+        const COWARD_EYE_COOL = 0.55;       // push eye tint toward a dull cool grey
+        const GLUTTON_BREATH_RATE = 1.35;
+        const GLUTTON_PERLIN_AMP = 1.3;
+        const GLUTTON_EYE_WARM = 1.0;       // push eye tint redder at any risk
+        const GLUTTON_LEAN_BIAS = 1.7;      // extra lean toward the cursor (relative)
+        const NEUTRAL_ALL = 1.0;            // NEUTRAL persona: all multipliers exactly 1.0
+        const SCAR_VISIBLE_MAX = 3;         // visible scars at once (oldest fades over time)
+        const SCAR_FADE_FRAMES = 2400;      // frames for a scar to fade to its floor
+        const SCAR_ALPHA_PEAK = 140;        // newest-scar peak alpha (subtle dark red)
+
+        // ----- PREDICTION -----
+        const MOUSE_BUFFER_SIZE = 60;       // frames of mouse history (ring buffer)
+        const VEL_SMOOTH = 0.15;            // low-pass coefficient on raw speed
+        const JIT_SMOOTH = 0.10;            // low-pass coefficient on direction jitter
+        const ANTICIPATION_SMOOTH = 0.015;  // ~1-2 s ramp in/out of the anticipation factor
+        const ANTICIPATION_VEL_W = 0.55;    // weight of speed in anticipation
+        const ANTICIPATION_JIT_W = 0.45;    // weight of jitter in anticipation
+        const VEL_NORM_PX = 10;             // px/frame that maps to full speed norm
+        const JIT_NORM_RAD = 0.35;          // rms turn (rad) that maps to full jitter norm
+        const JIT_MIN_DISP_PX = 1.5;        // ignore sub-threshold displacements in jitter
+        const HIGH_VEL_THRESHOLD = 8;       // "was moving fast" (smoothed, px/frame)
+        const LOW_VEL_THRESHOLD = 0.6;      // "is now still" (smoothed, px/frame)
+        const SUDEN_STOP_LOOKBACK = 30;     // window in which "was fast" must have occurred
+        const SUDEN_STOP_LOW_RUN = 14;      // consecutive still frames that arm the breath-hold
+        const PUPIL_GAIN_MAX = 2.5;         // pupil tracking scale = 1 + anticipation * this
+        const PUPIL_DILATION = 0.18;        // fractional eye growth at full anticipation
+        const PUPIL_LOCK_GAIN = 3.0;        // pupil tracking scale while breath is held
+        const LEAN_FACTOR = 0.05;           // lean = smoothed mouse offset * factor
+        const LEAN_MAX_PX = 18;             // lean hard cap
+        const MIRROR_GAIN = 0.02;           // mouse position -> breath pulse gain
+        const MIRROR_SMOOTH = 0.05;         // low-pass on the mirror signal
+        const MIRROR_MAX_PX = 12;           // mirror influence hard cap
+        const BREATH_HOLD_MIN = 60;         // held-breath duration range (frames)
+        const BREATH_HOLD_MAX = 120;
+        const EXHALE_BOOST = 1.6;           // one slightly exaggerated exhale after the hold
+        const EXHALE_DECAY = 0.045;         // per-frame return of the exhale boost toward 1
+        // Button-proximity intent ("the read"): feedIntent / fleeIntent, 0..1
+        const SENSE_RADIUS_MULT = 3.0;      // sense radius = this x button half-diagonal (~237 px)
+        const INTENT_DWELL_FRAMES = 75;     // ~1.2 s linger before intent is "committed" (60-90 band)
+        const INTENT_DWELL_DECAY = 4;       // dwell frames lost per frame once the cursor leaves
+        const INTENT_SMOOTH = 0.03;         // low-pass on the gated signal (~0.5 s settle/decay)
+        const STATE_INTENT_DAMP = 0.5;      // intent strength while CONSUMED/ESCAPED (shock/recovery)
+        const FEED_LEAN_PX = 10;            // max lean toward the feed button at intent 1 (eagerness)
+        const FLEE_RECOIL_PX = 12;          // max recoil away from the flee button at intent 1 (anger)
+        const FEED_BREATH_GAIN = 0.5;       // +50% breath rate at full feeding intent
+        const FLEE_BREATH_GAIN = 0.6;       // +60% breath rate at full escape intent
+        const FEED_EYE_GLOW = 0.5;          // eye brighten/warm weight at full feeding intent
+        const FEED_EYE_DILATE = 0.1;        // slight dilation at full feeding intent
+        const FLEE_EYE_FLARE = 0.9;         // red flare weight at full escape intent
+        const FLEE_EYE_NARROW = 0.35;       // slit height reduction at full escape intent
+        const FLEE_JITTER_GAIN = 0.6;       // Perlin edge amplitude increase at full escape intent
+        const INTENT_HALO_FEED_WARM = 0.4;  // halo -> warm amber at full feeding intent
+        const INTENT_HALO_FLEE_RED = 0.7;   // halo -> saturated red at full escape intent
+        const INTENT_HALO_FLEE_INTENSITY = 0.5; // halo alpha boost at full escape intent
+
+        // ----- SPEECH -----
+        const SPEECH_MAX_ALPHA = 140;       // whisper peak alpha (never fully opaque; <= 160)
+        const SPEECH_FADE_IN = 60;          // ~1 s
+        const SPEECH_HOLD = 150;            // ~2.5 s (2-3 s band)
+        const SPEECH_FADE_OUT = 60;         // ~1 s
+        const SPEECH_COOLDOWN = 540;        // ~9 s silence between utterances (8-12 s band)
+        const SPEECH_TEXT_SIZE = 19;
+        const SPEECH_OFFSET_FROM_BODY = 46; // px outside the body edge
+        const SPEECH_DRIFT_PX = 10;         // Perlin drift amplitude of the whisper
+        const SPEECH_ANTICIPATION_LEVEL = 0.6;   // "trembling" threshold
+        const SPEECH_ANTICIPATION_SUSTAIN = 120; // ~2 s sustained
+        const SPEECH_QUIET_FEEDS = 2;       // min feeds this round before the quiet line may fire
+        // =====================================================================
+        // ===== MODULE: VEIL =====
+        // Metaphor instead of numbers: a halo for risk, warm soul motes for the
+        // current tribute, a cool drifting trail for banked souls. Reads engine
+        // state only; writes nothing to it. Presentation only.
+        // =====================================================================
+        let haloPhase = 0;
+        let soulsCurrent = [];   // warm motes orbiting the body (current tribute)
+        let soulsBanked = [];    // cool motes drifting near the top edge (banked souls)
+        let burstParticles = []; // one-time scatter on CONSUMED
+        let lastVeilState = 'IDLE';
+
+        function veilTotalCount() {
+            return soulsCurrent.length + soulsBanked.length + burstParticles.length;
+        }
+
+        function spawnCurrentSoul() {
+            if (veilTotalCount() >= PARTICLE_HARD_CAP) return;
+            soulsCurrent.push({
+                angle: random(TWO_PI),
+                dist: 1.06 + random(0.22),                 // just outside the body edge
+                orbitSpeed: random(0.004, 0.012) * (random() < 0.5 ? -1 : 1),
+                seed: random(1000),
+                size: random(2.5, 5),
+                alpha: 0,
+                targetAlpha: SOUL_ALPHA_MAX
+            });
+        }
+
+        function spawnBankedSoul() {
+            if (veilTotalCount() >= PARTICLE_HARD_CAP) return;
+            soulsBanked.push({
+                u: random(),                               // normalized x along top edge (resize-safe)
+                seed: random(1000),
+                drift: random(0.0003, 0.0009),
+                size: random(2, 4),
+                alpha: 0,
+                targetAlpha: SOUL_BANKED_ALPHA
+            });
+        }
+
+        // On CONSUMED the tribute motes burst outward once, then fade away.
+        function triggerDeathBurst() {
+            for (let s of soulsCurrent) {
+                if (veilTotalCount() >= PARTICLE_HARD_CAP) break; // pin the hard cap (conversion is 1:1)
+                const dist = beastFinalRadius * s.dist;
+                const speed = random(1.5, 5);
+                burstParticles.push({
+                    x: beastX + Math.cos(s.angle) * dist,
+                    y: beastY + Math.sin(s.angle) * dist,
+                    vx: Math.cos(s.angle) * speed,
+                    vy: Math.sin(s.angle) * speed,
+                    alpha: Math.max(60, s.alpha),
+                    size: s.size + random(1, 3)
+                });
+            }
+            soulsCurrent.length = 0;
+            for (let i = 0; i < DEATH_BURST_EXTRA; i++) {
+                if (veilTotalCount() >= PARTICLE_HARD_CAP) break;
+                const a = random(TWO_PI);
+                const speed = random(1.5, 5);
+                burstParticles.push({
+                    x: beastX + Math.cos(a) * beastFinalRadius,
+                    y: beastY + Math.sin(a) * beastFinalRadius,
+                    vx: Math.cos(a) * speed,
+                    vy: Math.sin(a) * speed,
+                    alpha: random(80, 160),
+                    size: random(2, 5)
+                });
+            }
+        }
+
+        function updateVeil() {
+            // One-time death scatter (fires once on the transition into CONSUMED)
+            if (gameState === 'CONSUMED' && lastVeilState !== 'CONSUMED') {
+                triggerDeathBurst();
+            }
+            lastVeilState = gameState;
+
+            // ---- Current tribute motes (warm) ----
+            const targetCurrent = (gameState === 'FEEDING')
+                ? Math.min(consumedItems.length, SOUL_CURRENT_MAX) : 0;
+            let active = 0;
+            for (let s of soulsCurrent) { if (s.targetAlpha > 0) active++; }
+            if (active < targetCurrent) {
+                for (let i = 0; i < SOUL_SPAWN_PER_FRAME && active < targetCurrent; i++) {
+                    spawnCurrentSoul();
+                    active++;
+                }
+            } else if (active > targetCurrent) {
+                let excess = active - targetCurrent;
+                for (let i = soulsCurrent.length - 1; i >= 0 && excess > 0; i--) {
+                    if (soulsCurrent[i].targetAlpha > 0) {
+                        soulsCurrent[i].targetAlpha = 0;
+                        excess--;
+                    }
+                }
+            }
+            for (let i = soulsCurrent.length - 1; i >= 0; i--) {
+                const s = soulsCurrent[i];
+                s.angle += s.orbitSpeed * (1 + hiddenRisk * 1.5);
+                s.alpha += (s.targetAlpha - s.alpha) * SOUL_FADE_RATE;
+                if (s.targetAlpha === 0 && s.alpha < 1) soulsCurrent.splice(i, 1);
+            }
+
+            // ---- Banked trail (cool, faint, log-like count) ----
+            const targetBanked = (totalSoulsBanked > 0)
+                ? Math.min(SOUL_BANKED_MAX, Math.floor(Math.log(1 + totalSoulsBanked) * SOUL_BANKED_LOG_K))
+                : 0;
+            let bActive = 0;
+            for (let b of soulsBanked) { if (b.targetAlpha > 0) bActive++; }
+            if (bActive < targetBanked) {
+                for (let i = 0; i < SOUL_BANKED_SPAWN_PER_FRAME && bActive < targetBanked; i++) {
+                    spawnBankedSoul();
+                    bActive++;
+                }
+            } else if (bActive > targetBanked) {
+                let excess = bActive - targetBanked;
+                for (let i = soulsBanked.length - 1; i >= 0 && excess > 0; i--) {
+                    if (soulsBanked[i].targetAlpha > 0) {
+                        soulsBanked[i].targetAlpha = 0;
+                        excess--;
+                    }
+                }
+            }
+            for (let i = soulsBanked.length - 1; i >= 0; i--) {
+                const b = soulsBanked[i];
+                b.u = (b.u + b.drift) % 1;
+                b.alpha += (b.targetAlpha - b.alpha) * SOUL_FADE_RATE;
+                if (b.targetAlpha === 0 && b.alpha < 1) soulsBanked.splice(i, 1);
+            }
+
+            // ---- One-time death scatter ----
+            for (let i = burstParticles.length - 1; i >= 0; i--) {
+                const p = burstParticles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vx *= 0.94;
+                p.vy *= 0.94;
+                p.alpha -= DEATH_BURST_DECAY;
+                if (p.alpha <= 0) burstParticles.splice(i, 1);
+            }
+        }
+
+        // Soft glow behind the body. Pulse speed and radius envelope scale with
+        // hiddenRisk (suspended while the beast holds its breath). At risk 0 it
+        // is nearly invisible; at risk 1 it is a strong crimson pulse.
+        function drawHalo(bodyRadius) {
+            if (breathHoldFrames <= 0) {
+                haloPhase += (HALO_PULSE_CALM + hiddenRisk * HALO_PULSE_RISK);
+            }
+            const pulse = 0.5 + 0.5 * Math.sin(haloPhase);
+            const swell = (HALO_SWELL_CALM + (HALO_SWELL_RISK - HALO_SWELL_CALM) * hiddenRisk) * pulse;
+            const baseAlpha = HALO_ALPHA_MIN + (HALO_ALPHA_MAX - HALO_ALPHA_MIN) * hiddenRisk;
+            const a = baseAlpha * (0.35 + 0.65 * pulse) * (1 + fleeIntent * INTENT_HALO_FLEE_INTENSITY);
+            let c = lerpColor(color(70, 85, 110), color(205, 30, 20), hiddenRisk);
+            // Intent (PREDICTION): feeding warms the halo; escape reddens it
+            if (feedIntent > 0) c = lerpColor(c, color(215, 145, 60), feedIntent * INTENT_HALO_FEED_WARM);
+            if (fleeIntent > 0) c = lerpColor(c, color(235, 25, 20), fleeIntent * INTENT_HALO_FLEE_RED);
+            noStroke();
+            for (let i = HALO_LAYERS - 1; i >= 0; i--) {
+                const r = bodyRadius * (1 + 0.18 * i) * (1 + swell);
+                fill(red(c), green(c), blue(c), a * Math.pow(0.55, i));
+                ellipse(0, 0, r * 2, r * 2);
+            }
+        }
+
+        function drawSouls() {
+            // Warm tribute motes orbiting just outside the body edge
+            noStroke();
+            for (let s of soulsCurrent) {
+                const dist = beastFinalRadius * s.dist
+                    + (noise(s.seed + frameCount * 0.008) - 0.5) * SOUL_DRIFT_PX;
+                const x = beastX + Math.cos(s.angle) * dist;
+                const y = beastY + Math.sin(s.angle) * dist;
+                fill(255, 205, 130, s.alpha);
+                ellipse(x, y, s.size, s.size);
+            }
+            // One-time death scatter
+            for (let p of burstParticles) {
+                fill(255, 120, 80, Math.max(0, p.alpha));
+                ellipse(p.x, p.y, p.size, p.size);
+            }
+        }
+
+        function drawBankedTrail() {
+            // Faint cool motes drifting near the top edge (banked souls)
+            noStroke();
+            for (let b of soulsBanked) {
+                const x = b.u * width;
+                const y = 26 + (noise(b.seed + frameCount * 0.003) - 0.5) * 46;
+                fill(150, 180, 215, b.alpha);
+                ellipse(x, y, b.size, b.size);
+            }
+        }
+        // =====================================================================
+        // ===== MODULE: MEMORY =====
+        // In-session behavioral continuity (resets on reload, nothing stored).
+        // Aggregates how you played, derives a PRESENTATION persona
+        // (COWARD / GLUTTON / NEUTRAL), and keeps scars. Observes the engine
+        // via frame-to-frame state diffs, so the engine functions remain
+        // byte-identical. Presentation only.
+        // =====================================================================
+        let memory = {
+            rounds: 0,
+            totalFeeds: 0,
+            deepFeeds: 0,      // feeds made while hiddenRisk > DEEP_FEED_RISK
+            earlyFlees: 0,     // flees at risk < EARLY_FLEE_RISK or < EARLY_FLEE_MAX_FEEDS feeds
+            deaths: 0,
+            lastRoundResult: null, // 'CONSUMED' | 'ESCAPED' | null
+            lastRoundGluttonDeath: false
+        };
+        let scars = [];        // { angle, span, r, w, born } - persist across the session
+        let persona = {
+            name: 'NEUTRAL',
+            radiusScale: 1.0,
+            breathScale: 1.0,
+            eyeSquish: 1.0,    // vertical eye scale (half-lidded for COWARD)
+            perlinScale: 1.0,
+            eyeCool: 0.0,      // COWARD: dull cool eye tint
+            eyeWarm: 0.0,      // GLUTTON: redder eye tint at any risk
+            leanBias: 1.0      // GLUTTON: leans harder toward the cursor
+        };
+        // Frame-diff observation state (keeps engine functions untouched)
+        let prevGameState = 'IDLE';
+        let lastRiskObserved = 0;
+        let lastFeedsObserved = 0;
+
+        function derivePersona() {
+            // Order matters (per spec): COWARD tested first, then GLUTTON.
+            if (memory.earlyFlees >= COWARD_EARLY_FLEES && memory.deepFeeds === 0) {
+                persona.name = 'COWARD';
+                persona.radiusScale = COWARD_RADIUS_SCALE;
+                persona.breathScale = COWARD_BREATH_RATE;
+                persona.eyeSquish = COWARD_EYE_SQUISH;
+                persona.perlinScale = COWARD_PERLIN_AMP;
+                persona.eyeCool = COWARD_EYE_COOL;
+                persona.eyeWarm = 0.0;
+                persona.leanBias = 1.0;
+            } else if (memory.deaths >= GLUTTON_DEATHS || memory.deepFeeds >= GLUTTON_DEEP_FEEDS) {
+                persona.name = 'GLUTTON';
+                persona.radiusScale = NEUTRAL_ALL;
+                persona.breathScale = GLUTTON_BREATH_RATE;
+                persona.eyeSquish = NEUTRAL_ALL;
+                persona.perlinScale = GLUTTON_PERLIN_AMP;
+                persona.eyeCool = 0.0;
+                persona.eyeWarm = GLUTTON_EYE_WARM;
+                persona.leanBias = GLUTTON_LEAN_BIAS;
+            } else {
+                persona.name = 'NEUTRAL';
+                persona.radiusScale = NEUTRAL_ALL;
+                persona.breathScale = NEUTRAL_ALL;
+                persona.eyeSquish = NEUTRAL_ALL;
+                persona.perlinScale = NEUTRAL_ALL;
+                persona.eyeCool = 0.0;
+                persona.eyeWarm = 0.0;
+                persona.leanBias = NEUTRAL_ALL;
+            }
+        }
+
+        function addScar() {
+            scars.push({
+                angle: random(TWO_PI),            // semi-random, then fixed
+                span: random(0.35, 0.8),
+                r: random(0.18, 0.5),             // fraction of body radius
+                w: random(2, 5),
+                born: frameCount
+            });
+            if (scars.length > SCAR_VISIBLE_MAX + 3) scars.shift();
+        }
+
+        function drawScars(bodyRadius) {
+            // Subtle dark-red curves on the body; only the newest SCAR_VISIBLE_MAX
+            // are drawn and the oldest fade over time.
+            const start = Math.max(0, scars.length - SCAR_VISIBLE_MAX);
+            for (let i = start; i < scars.length; i++) {
+                const sc = scars[i];
+                const age = frameCount - sc.born;
+                let a = constrain(1 - age / SCAR_FADE_FRAMES, 0.15, 1) * (SCAR_ALPHA_PEAK / 255);
+                if (gameState === 'ESCAPED') a *= 0.4;
+                if (a <= 0.01) continue;
+                const r = bodyRadius * sc.r;
+                const x1 = Math.cos(sc.angle - sc.span / 2) * r;
+                const y1 = Math.sin(sc.angle - sc.span / 2) * r;
+                const x2 = Math.cos(sc.angle + sc.span / 2) * r;
+                const y2 = Math.sin(sc.angle + sc.span / 2) * r;
+                const cr = r * 0.8;               // curve dips slightly inward
+                const c1x = Math.cos(sc.angle - sc.span * 0.2) * cr;
+                const c1y = Math.sin(sc.angle - sc.span * 0.2) * cr;
+                const c2x = Math.cos(sc.angle + sc.span * 0.2) * cr;
+                const c2y = Math.sin(sc.angle + sc.span * 0.2) * cr;
+                noFill();
+                stroke(75, 12, 14, a * 255);
+                strokeWeight(sc.w * Math.max(0.5, bodyRadius / 250));
+                bezier(x1, y1, c1x, c1y, c2x, c2y, x2, y2);
+            }
+            noStroke();
+        }
+
+        function observeSystem() {
+            // Per-frame state-diff bookkeeping. Reads engine state only.
+            const st = gameState;
+            const feedsNow = consumedItems.length;
+
+            if (st === 'FEEDING' && prevGameState === 'FEEDING') {
+                const delta = feedsNow - lastFeedsObserved;
+                if (delta > 0) {
+                    memory.totalFeeds += delta;
+                    // The risk faced when feeding = the risk last drawn
+                    if (lastRiskObserved > DEEP_FEED_RISK) memory.deepFeeds += delta;
+                }
+            }
+
+            if (st !== prevGameState) {
+                if (st === 'FEEDING') {
+                    // Round start
+                    memory.rounds++;
+                    memory.lastRoundResult = (prevGameState === 'CONSUMED') ? 'CONSUMED'
+                        : (prevGameState === 'ESCAPED') ? 'ESCAPED' : null;
+                    // The glutton flag must survive into a round that FOLLOWS a
+                    // death; otherwise clear it (speech reads it right below).
+                    if (memory.lastRoundResult !== 'CONSUMED') memory.lastRoundGluttonDeath = false;
+                    derivePersona();
+                    resetPredictionRound();   // (PREDICTION)
+                    queueRoundStartSpeech();  // (SPEECH)
+                } else if (st === 'CONSUMED') {
+                    // Death. The fatal pull is inside consumedItems, so the round's
+                    // feeds are what we observed before it.
+                    memory.deaths++;
+                    memory.lastRoundGluttonDeath =
+                        (lastFeedsObserved >= GLUTTON_DEATH_LONG_FEEDS || lastRiskObserved > DEEP_FEED_RISK);
+                    addScar();
+                } else if (st === 'ESCAPED') {
+                    if (lastRiskObserved < EARLY_FLEE_RISK || lastFeedsObserved < EARLY_FLEE_MAX_FEEDS) {
+                        memory.earlyFlees++;
+                    }
+                }
+            }
+
+            lastRiskObserved = hiddenRisk;
+            lastFeedsObserved = feedsNow;
+            prevGameState = st;
+        }
+        // =====================================================================
+        // ===== MODULE: PREDICTION =====
+        // The uncanny mirror: models your MOTION - never your clicks - and
+        // answers with dilated tracking eyes, a lean toward you, breathing
+        // entangled with your movement, and a breath-hold when you suddenly
+        // stop. Presentation only.
+        // =====================================================================
+        let mouseHistory = [];      // ring buffer of recent mouse positions
+        let prevMouseX = NaN;
+        let prevMouseY = NaN;
+        let smoothedVel = 0;
+        let velHistory = [];        // smoothed speed over last SUDEN_STOP_LOOKBACK frames
+        let jitter = 0;             // smoothed RMS of direction change
+        let anticipation = 0;       // 0..1, low-passed (ramps over ~1-2 s)
+        let antSustain = 0;         // consecutive frames anticipation > threshold
+        let belowLowRun = 0;
+        let breathHoldFrames = 0;
+        let suddenStopsThisRound = 0;
+        let exhaleBoost = 1;
+        let leanX = 0, leanY = 0;
+        let smoothMouseOffX = 0, smoothMouseOffY = 0;
+        let mirrorInfluence = 0;
+        let feedIntent = 0, fleeIntent = 0;  // button-proximity intent, 0..1 (state-damped)
+        let feedDwell = 0, fleeDwell = 0;    // linger frames inside each button's sense radius
+
+        function resetPredictionRound() {
+            suddenStopsThisRound = 0;
+            antSustain = 0;
+        }
+
+        function resetPredictionAfterResize() {
+            mouseHistory.length = 0;
+            velHistory.length = 0;
+            prevMouseX = NaN;
+            prevMouseY = NaN;
+            smoothedVel = 0;
+            jitter = 0;
+            anticipation = 0;
+            antSustain = 0;
+            belowLowRun = 0;
+            smoothMouseOffX = 0;
+            smoothMouseOffY = 0;
+            mirrorInfluence = 0;
+            leanX = 0;
+            leanY = 0;
+            feedIntent = 0;
+            fleeIntent = 0;
+            feedDwell = 0;
+            fleeDwell = 0;
+        }
+
+        function updatePrediction() {
+            const mx = mouseX, my = mouseY;
+
+            if (isNaN(prevMouseX)) {
+                prevMouseX = mx;
+                prevMouseY = my;
+            }
+
+            const dx = mx - prevMouseX;
+            const dy = my - prevMouseY;
+            const instVel = Math.sqrt(dx * dx + dy * dy);
+            prevMouseX = mx;
+            prevMouseY = my;
+
+            // Ring buffer of positions
+            mouseHistory.push({ x: mx, y: my });
+            if (mouseHistory.length > MOUSE_BUFFER_SIZE) mouseHistory.shift();
+
+            // Low-passed speed
+            smoothedVel += (instVel - smoothedVel) * VEL_SMOOTH;
+            velHistory.push(smoothedVel);
+            if (velHistory.length > SUDEN_STOP_LOOKBACK) velHistory.shift();
+
+            // Jitter = RMS of direction change across successive displacements
+            let sumSq = 0, n = 0, lastAngle = NaN;
+            for (let i = 1; i < mouseHistory.length; i++) {
+                const a = mouseHistory[i - 1], b = mouseHistory[i];
+                const ddx = b.x - a.x, ddy = b.y - a.y;
+                if (Math.sqrt(ddx * ddx + ddy * ddy) > JIT_MIN_DISP_PX) {
+                    const ang = Math.atan2(ddy, ddx);
+                    if (!isNaN(lastAngle)) {
+                        let turn = ang - lastAngle;
+                        while (turn > Math.PI) turn -= TWO_PI;
+                        while (turn < -Math.PI) turn += TWO_PI;
+                        sumSq += turn * turn;
+                        n++;
+                    }
+                    lastAngle = ang;
+                } else {
+                    lastAngle = NaN;
+                }
+            }
+            const jitInst = n > 0 ? Math.sqrt(sumSq / n) : 0;
+            jitter += (jitInst - jitter) * JIT_SMOOTH;
+
+            // Anticipation (0..1), low-passed so it ramps in/out over ~1-2 s
+            const velNorm = constrain(smoothedVel / VEL_NORM_PX, 0, 1);
+            const jitNorm = constrain(jitter / JIT_NORM_RAD, 0, 1);
+            const target = constrain(ANTICIPATION_VEL_W * velNorm + ANTICIPATION_JIT_W * jitNorm, 0, 1);
+            anticipation += (target - anticipation) * ANTICIPATION_SMOOTH;
+            antSustain = (anticipation > SPEECH_ANTICIPATION_LEVEL) ? antSustain + 1 : 0;
+
+            // Sudden stop -> breath-hold: was fast within the lookback window,
+            // then still for a run of frames. Fires once per crossing, only
+            // while actively feeding.
+            let recentHigh = 0;
+            for (let v of velHistory) { if (v > recentHigh) recentHigh = v; }
+            if (smoothedVel < LOW_VEL_THRESHOLD) belowLowRun++;
+            else belowLowRun = 0;
+            if (mouseHistory.length >= 8 && recentHigh > HIGH_VEL_THRESHOLD &&
+                belowLowRun === SUDEN_STOP_LOW_RUN && gameState === 'FEEDING') {
+                breathHoldFrames = Math.floor(random(BREATH_HOLD_MIN, BREATH_HOLD_MAX));
+                suddenStopsThisRound++;
+            }
+
+            // Hold countdown; one slightly exaggerated exhale when released
+            if (breathHoldFrames > 0) {
+                breathHoldFrames--;
+                if (breathHoldFrames === 0) exhaleBoost = EXHALE_BOOST;
+            }
+            exhaleBoost += (1 - exhaleBoost) * EXHALE_DECAY;
+
+            // ---- Button-proximity intent ("the read") ----
+            // What you are ABOUT to do, inferred from where your hand goes -
+            // before any click. Proximity alone is not enough: the dwell ramp
+            // means the reaction arrives only after SENSED COMMITMENT, never
+            // like a hover state. Positions only; the beast never reads clicks.
+            const bodyCX = width / 2, bodyCY = height / 2 - 50;
+            const fCX = (btnFeed.x != null) ? btnFeed.x + btnFeed.w / 2 : bodyCX;
+            const fCY = (btnFeed.y != null) ? btnFeed.y + btnFeed.h / 2 : bodyCY;
+            const lCX = (btnFlee.x != null) ? btnFlee.x + btnFlee.w / 2 : bodyCX;
+            const lCY = (btnFlee.y != null) ? btnFlee.y + btnFlee.h / 2 : bodyCY;
+            const fDx = fCX - bodyCX, fDy = fCY - bodyCY;
+            const lDx = lCX - bodyCX, lDy = lCY - bodyCY;
+            const fLen = Math.sqrt(fDx * fDx + fDy * fDy) || 1;
+            const lLen = Math.sqrt(lDx * lDx + lDy * lDy) || 1;
+
+            if (btnFeed.x != null && btnFlee.x != null) {
+                // Sense radius: SENSE_RADIUS_MULT x the button half-diagonal
+                const fHalf = Math.sqrt((btnFeed.w / 2) * (btnFeed.w / 2) + (btnFeed.h / 2) * (btnFeed.h / 2));
+                const lHalf = Math.sqrt((btnFlee.w / 2) * (btnFlee.w / 2) + (btnFlee.h / 2) * (btnFlee.h / 2));
+                const fDist = Math.sqrt((mx - fCX) * (mx - fCX) + (my - fCY) * (my - fCY));
+                const lDist = Math.sqrt((mx - lCX) * (mx - lCX) + (my - lCY) * (my - lCY));
+
+                // 1.0 over the button itself, 0 at the sense-radius edge
+                const fProx = constrain(1 - (fDist - fHalf) / (fHalf * (SENSE_RADIUS_MULT - 1)), 0, 1);
+                const lProx = constrain(1 - (lDist - lHalf) / (lHalf * (SENSE_RADIUS_MULT - 1)), 0, 1);
+
+                // Dwell: linger frames inside the sense radius (any proximity)
+                if (fProx > 0) feedDwell = Math.min(INTENT_DWELL_FRAMES, feedDwell + 1);
+                else feedDwell = Math.max(0, feedDwell - INTENT_DWELL_DECAY);
+                if (lProx > 0) fleeDwell = Math.min(INTENT_DWELL_FRAMES, fleeDwell + 1);
+                else fleeDwell = Math.max(0, fleeDwell - INTENT_DWELL_DECAY);
+
+                // Shock/recovery outside FEEDING; IDLE reads at full strength
+                const damp = (gameState === 'FEEDING' || gameState === 'IDLE') ? 1.0 : STATE_INTENT_DAMP;
+                feedIntent += (damp * fProx * (feedDwell / INTENT_DWELL_FRAMES) - feedIntent) * INTENT_SMOOTH;
+                fleeIntent += (damp * lProx * (fleeDwell / INTENT_DWELL_FRAMES) - fleeIntent) * INTENT_SMOOTH;
+            }
+
+            // Lean toward the cursor (GLUTTON leans harder). Intent adds its own
+            // directed component - feed: eagerness toward the feed button, flee:
+            // recoil AWAY from the flee button (cancels part of the cursor lean;
+            // the body refuses to chase your escape). All recapped at LEAN_MAX_PX.
+            const leanFactor = LEAN_FACTOR * persona.leanBias;
+            smoothMouseOffX += ((mx - width / 2) - smoothMouseOffX) * MIRROR_SMOOTH;
+            smoothMouseOffY += ((my - height / 2) - smoothMouseOffY) * MIRROR_SMOOTH;
+            leanX = constrain(smoothMouseOffX * leanFactor
+                + (fDx / fLen) * feedIntent * FEED_LEAN_PX
+                - (lDx / lLen) * fleeIntent * FLEE_RECOIL_PX, -LEAN_MAX_PX, LEAN_MAX_PX);
+            leanY = constrain(smoothMouseOffY * leanFactor
+                + (fDy / fLen) * feedIntent * FEED_LEAN_PX
+                - (lDy / lLen) * fleeIntent * FLEE_RECOIL_PX, -LEAN_MAX_PX, LEAN_MAX_PX);
+
+            // Mirror sync: low-passed mouse POSITION folds into the breath pulse
+            const rawMirror = (mx - width / 2) * MIRROR_GAIN;
+            mirrorInfluence += (rawMirror - mirrorInfluence) * MIRROR_SMOOTH;
+            mirrorInfluence = constrain(mirrorInfluence, -MIRROR_MAX_PX, MIRROR_MAX_PX);
+        }
+        // =====================================================================
+        // ===== MODULE: SPEECH =====
+        // The beast speaks in metaphor - never numbers. Seven short lines,
+        // each tied to INFERRED behavior (from MEMORY + PREDICTION). At most
+        // one active utterance, a long cooldown between, only while FEEDING;
+        // otherwise the beast is silent. Silence is part of the design.
+        // =====================================================================
+        const SPEECH_LINES = {
+            again: 'Again?',
+            stillHere: 'Still here...',
+            glutton: 'Glutton.',
+            alwaysRun: 'You always run.',
+            trembling: "You're trembling.",
+            waiting: 'I see you waiting.',
+            quiet: 'It is quiet. For now.'
+        };
+        let utterance = null;         // { text, t, dur, angle, seed }
+        let queuedRoundLine = null;   // { text, atFrame }
+        let lastUtteranceEndFrame = -99999;
+        let tremblingLatched = false;
+        let waitingLatched = false;
+        let quietLatched = false;
+
+        function queueRoundStartSpeech() {
+            // "Again?" / "Still here..." fire at round start; "Glutton." /
+            // "You always run." are queued to land a few seconds into the
+            // round - i.e., still inside the FEEDING state.
+            tremblingLatched = false;
+            waitingLatched = false;
+            quietLatched = false;
+            // Most-specific-first, so all four lines stay reachable
+            // (a glutton death implies a death; flee patterns outlast early rounds):
+            // diagnosed glutton death > any death > flee call-out > persistence.
+            let text = null, delay = 0;
+            if (memory.lastRoundGluttonDeath) {
+                text = SPEECH_LINES.glutton;
+                delay = Math.floor(random(120, 260));
+            } else if (memory.lastRoundResult === 'CONSUMED') {
+                text = SPEECH_LINES.again;
+                delay = Math.floor(random(60, 120));
+            } else if (memory.earlyFlees >= COWARD_EARLY_FLEES) {
+                text = SPEECH_LINES.alwaysRun;
+                delay = Math.floor(random(120, 300));
+            } else if (memory.rounds >= 3) {
+                text = SPEECH_LINES.stillHere;
+                delay = Math.floor(random(120, 240));
+            }
+            queuedRoundLine = text ? { text: text, atFrame: frameCount + delay } : null;
+        }
+
+        function startUtterance(text) {
+            utterance = {
+                text: text,
+                t: 0,
+                dur: SPEECH_FADE_IN + SPEECH_HOLD + SPEECH_FADE_OUT,
+                angle: random(TWO_PI),
+                seed: random(1000)
+            };
+        }
+
+        function updateSpeech() {
+            // Deliver a queued round-start line once its delay has passed
+            if (queuedRoundLine) {
+                if (frameCount >= queuedRoundLine.atFrame) {
+                    if (gameState === 'FEEDING' && !utterance) {
+                        startUtterance(queuedRoundLine.text);
+                    }
+                    queuedRoundLine = null;
+                }
+            }
+
+            // Advance (or end) the current utterance
+            if (utterance) {
+                utterance.t++;
+                if (utterance.t > utterance.dur) {
+                    utterance = null;
+                    lastUtteranceEndFrame = frameCount;
+                }
+                return; // at most ONE active utterance
+            }
+
+            // Mid-round lines: only while feeding, only after the cooldown
+            if (gameState !== 'FEEDING') return;
+            if (queuedRoundLine) return; // wait for the round-start line to resolve
+            if (frameCount - lastUtteranceEndFrame < SPEECH_COOLDOWN) return;
+
+            if (antSustain === 0) tremblingLatched = false;
+            if (antSustain > 0 || suddenStopsThisRound > 0) quietLatched = false;
+
+            let line = null;
+            if (!tremblingLatched && antSustain >= SPEECH_ANTICIPATION_SUSTAIN) {
+                line = SPEECH_LINES.trembling;
+                tremblingLatched = true;
+            } else if (!waitingLatched && suddenStopsThisRound >= 2) {
+                line = SPEECH_LINES.waiting;
+                waitingLatched = true;
+            } else if (!quietLatched && consumedItems.length >= SPEECH_QUIET_FEEDS && antSustain === 0 && suddenStopsThisRound === 0) {
+                line = SPEECH_LINES.quiet;
+                quietLatched = true;
+            }
+            if (line) startUtterance(line);
+        }
+
+        function drawSpeech() {
+            if (!utterance || gameState !== 'FEEDING') return;
+            const t = utterance.t;
+            let a;
+            if (t < SPEECH_FADE_IN) a = t / SPEECH_FADE_IN;
+            else if (t < SPEECH_FADE_IN + SPEECH_HOLD) a = 1;
+            else a = Math.max(0, 1 - (t - SPEECH_FADE_IN - SPEECH_HOLD) / SPEECH_FADE_OUT);
+            if (a <= 0.01) return;
+
+            // Near the body edge at a random angle, drifting on Perlin noise
+            const r = beastFinalRadius + SPEECH_OFFSET_FROM_BODY;
+            const ang = utterance.angle + (noise(utterance.seed + t * 0.004) - 0.5) * 0.3;
+            let x = beastX + Math.cos(ang) * r + (noise(utterance.seed + 10 + t * 0.005) - 0.5) * 2 * SPEECH_DRIFT_PX;
+            let y = beastY + Math.sin(ang) * r + (noise(utterance.seed + 20 + t * 0.005) - 0.5) * 2 * SPEECH_DRIFT_PX;
+            x = constrain(x, 60, width - 60);
+            y = constrain(y, 40, height - 40);
+
+            textStyle(ITALIC);
+            textAlign(CENTER, CENTER);
+            textSize(SPEECH_TEXT_SIZE);
+            fill(235, 226, 210, a * SPEECH_MAX_ALPHA);
+            text(utterance.text, x, y);
+            textStyle(NORMAL);
+        }
+        // =====================================================================
+        // ===== RENDER / UI =====
+        // Base v2 render with module presentation hooks inlined where the base
+        // render already happens (breath, eyes, Perlin, radius, halo, scars).
+        // =====================================================================
+        let beastX = 0, beastY = 0;         // screen-space body center (with lean)
+        let beastFinalRadius = 100;         // last computed body radius (for VEIL/SPEECH)
+
+        // UI Layout vars
+        let btnFeed = { w: 150, h: 50 };
+        let btnFlee = { w: 150, h: 50 };
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            textFont('sans-serif');
+            // Initial ambient setup
+            targetRadius = 100;
+            currentRadius = 100;
+            // Module initialization (presentation state only)
+            beastX = windowWidth / 2;
+            beastY = windowHeight / 2 - 50;
+            beastFinalRadius = 100;
+            // Button layout init (drawOpaqueUI re-derives these every frame from
+            // width/height; this gives PREDICTION valid centers from frame one)
+            btnFeed.x = windowWidth / 2 - 170;
+            btnFeed.y = windowHeight - 100;
+            btnFlee.x = windowWidth / 2 + 20;
+            btnFlee.y = windowHeight - 100;
+            derivePersona();
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+            // Re-derive button centers now: updatePrediction runs before drawOpaqueUI
+            // each frame, so it would otherwise read pre-resize rects for one frame.
+            btnFeed.x = width / 2 - 170;
+            btnFeed.y = height - 100;
+            btnFlee.x = width / 2 + 20;
+            btnFlee.y = height - 100;
+            resetPredictionAfterResize(); // stale ring buffer would read as a false "sudden stop"
+        }
+
+        function draw() {
+            // Module updates (presentation only)
+            updatePrediction();
+            observeSystem();
+            beastX = width / 2 + leanX;
+            beastY = height / 2 - 50 + leanY;
+            updateVeil();
+            updateSpeech();
+
+            // 1. Environment Rendering (Reacts to hidden risk)
+            // As risk goes up, the blue background darkens and shifts to deep crimson
+            let calmBg = color(15, 23, 42); // slate-900
+            let dangerBg = color(69, 10, 10); // deep red
+            let currentBg = lerpColor(calmBg, dangerBg, hiddenRisk);
+            background(currentBg);
+
+            // Banked soul trail (VEIL) - faint, behind everything, near top edge
+            drawBankedTrail();
+
+            // Screen shake effect
+            let sx = 0;
+            let sy = 0;
+            if (shakeIntensity > 0) {
+                sx = random(-shakeIntensity, shakeIntensity);
+                sy = random(-shakeIntensity, shakeIntensity);
+            }
+
+            push();
+            translate(width / 2 + sx + leanX, height / 2 - 50 + sy + leanY);
+
+            // 2. The Beast Rendering (Procedural organic blob)
+            drawBeast();
+
+            pop();
+
+            // 3. Minimal Opaque UI (No percentages, no rules)
+            drawOpaqueUI();
+
+            // Current tribute souls (VEIL) - around the body
+            drawSouls();
+
+            // 4. The whisper (SPEECH)
+            drawSpeech();
+
+            // Jaws overlay if consumed
+            if (gameState === 'CONSUMED') {
+                fill(255, 0, 0, 80);
+                rect(0, 0, width, height);
+            }
+        }
+        function drawBeast() {
+            // Smoothly animate towards target radius (persona may scale it - presentation)
+            currentRadius = lerp(currentRadius, targetRadius * persona.radiusScale, 0.05);
+
+            // Breathing calculation based on hidden risk (persona scales the rate;
+            // the PREDICTION breath-hold freezes phase advancement)
+            // Intent (PREDICTION) quickens the breath: feed = eagerness, flee = anger
+            let breathSpeed = (0.02 + (hiddenRisk * 0.15)) * persona.breathScale
+                * (1 + feedIntent * FEED_BREATH_GAIN + fleeIntent * FLEE_BREATH_GAIN);
+            if (breathHoldFrames <= 0) {
+                breathPhase += breathSpeed;
+            }
+
+            let pulse = Math.sin(breathPhase) * (10 + (hiddenRisk * 30)) * exhaleBoost + mirrorInfluence;
+            let finalRadius = Math.max(10, currentRadius + pulse);
+            beastFinalRadius = finalRadius;
+
+            // Halo (VEIL) - behind the body
+            if (gameState !== 'ESCAPED') {
+                drawHalo(finalRadius);
+            }
+
+            // Draw shadowy organic body
+            noStroke();
+            let beastAlpha = gameState === 'ESCAPED' ? 100 : 255;
+            fill(10, 10, 10, beastAlpha);
+
+            beginShape();
+            for (let a = 0; a < TWO_PI; a += 0.1) {
+                // Perlin noise for organic undulating edge (persona scales the amplitude)
+                let xoff = map(cos(a), -1, 1, 0, 2);
+                let yoff = map(sin(a), -1, 1, 0, 2);
+                let noiseVal = noise(xoff + frameCount * 0.01, yoff + frameCount * 0.01);
+                let r = finalRadius + map(noiseVal, 0, 1, -30, 30) * persona.perlinScale
+                    * (1 + fleeIntent * FLEE_JITTER_GAIN); // escape-offended: the edge agitates
+
+                let x = r * cos(a);
+                let y = r * sin(a);
+                vertex(x, y);
+            }
+            endShape(CLOSE);
+
+            // Scars (MEMORY) - on the body, under the eyes
+            drawScars(finalRadius);
+
+            // Draw Eyes
+            if (gameState !== 'ESCAPED') {
+                drawEyes(finalRadius);
+            }
+        }
+
+        function drawEyes(bodyRadius) {
+            // Eye count increases at high risk thresholds
+            let numEyes = 2;
+            if (hiddenRisk > 0.3) numEyes = 4;
+            if (hiddenRisk > 0.6) numEyes = 8;
+            if (gameState === 'CONSUMED') numEyes = 12;
+
+            // Anticipation (PREDICTION) dilates the eyes slightly
+            // Feed intent (PREDICTION) adds a slight bright dilation
+            let dilation = 1 + anticipation * PUPIL_DILATION + feedIntent * FEED_EYE_DILATE;
+            if (breathHoldFrames > 0) dilation = Math.max(dilation, 1 + PUPIL_DILATION);
+
+            for (let i = 0; i < numEyes; i++) {
+                // Distribute eyes organically
+                let angle = (TWO_PI / numEyes) * i + (noise(i, frameCount * 0.01) * 0.5);
+                let distFromCenter = bodyRadius * 0.4 + (noise(i + 10) * bodyRadius * 0.3);
+
+                let ex = cos(angle) * distFromCenter;
+                let ey = sin(angle) * distFromCenter;
+
+                // Eye white (turns red/yellow at high risk); persona + anticipation shift the tint
+                let eyeC = lerpColor(color(255, 255, 255), color(255, 50, 0), hiddenRisk);
+                if (persona.eyeCool > 0) {
+                    eyeC = lerpColor(eyeC, color(150, 160, 185), persona.eyeCool * 0.7);
+                }
+                // Intent (PREDICTION): feeding brightens the eye warm; escape
+                // intent flares it toward saturated red
+                if (feedIntent > 0) eyeC = lerpColor(eyeC, color(255, 230, 200), feedIntent * FEED_EYE_GLOW * 0.6);
+                let warm = persona.eyeWarm * (0.25 + hiddenRisk * 0.5) + anticipation * 0.35
+                    + feedIntent * FEED_EYE_GLOW + fleeIntent * FLEE_EYE_FLARE;
+                if (breathHoldFrames > 0) warm = Math.max(warm, 0.4);
+                if (warm > 0) {
+                    eyeC = lerpColor(eyeC, color(255, 70, 15), constrain(warm, 0, 1));
+                }
+                fill(eyeC);
+                let eyeSize = (15 + (hiddenRisk * 15)) * dilation;
+                // Escape intent (PREDICTION) narrows the slits - it is offended
+                let squish = persona.eyeSquish * (1 - fleeIntent * FLEE_EYE_NARROW);
+                ellipse(ex, ey, eyeSize, eyeSize * 0.6 * squish); // Slit-like
+
+                // Pupil tracking mouse slightly (base), scaled by anticipation;
+                // hard-locked to the cursor during a breath-hold
+                let mx = constrain(map(mouseX - width / 2, -width / 2, width / 2, -3, 3), -3, 3);
+                let my = constrain(map(mouseY - height / 2, -height / 2, height / 2, -3, 3), -3, 3);
+                let gain = 1 + anticipation * PUPIL_GAIN_MAX;
+                if (breathHoldFrames > 0) gain = Math.max(gain, PUPIL_LOCK_GAIN);
+                let px = constrain(mx * gain, -eyeSize * 0.5, eyeSize * 0.5);
+                let py = constrain(my * gain, -eyeSize * 0.5, eyeSize * 0.5);
+
+                fill(0);
+                // Pupil shrinks as it gets angrier
+                let pupilSize = eyeSize * 0.5 - (hiddenRisk * (eyeSize * 0.2));
+                if (breathHoldFrames > 0) pupilSize *= 1.12; // fully locked -> slightly wider
+                if (pupilSize < 2) pupilSize = 2;
+                ellipse(ex + px, ey + py, pupilSize, pupilSize * 1.2);
+            }
+        }
+        function drawOpaqueUI() {
+            // The two numeric HUD lines of v2 are gone (VEIL): risk is now a
+            // halo, the tribute is warm motes, banked souls a cool trail.
+
+            // State Messages
+            textAlign(CENTER, TOP);
+            textStyle(BOLD);
+            textSize(32);
+            if (gameState === 'IDLE') {
+                fill(200);
+                text("THE BEAST SLUMBERS.", width / 2, height / 2 - 150);
+            } else if (gameState === 'CONSUMED') {
+                fill(255, 50, 50);
+                text("YOU WERE CONSUMED.", width / 2, height / 2 - 150);
+            } else if (gameState === 'ESCAPED') {
+                fill(100, 200, 255);
+                text("YOU SURVIVED THIS ENCOUNTER.", width / 2, height / 2 - 150);
+            }
+            textStyle(NORMAL);
+
+            // Banked souls counter — revealed only after a successful escape
+            // (not shown during FEEDING, so the observer cannot track their progress)
+            if (gameState === 'ESCAPED' && totalSoulsBanked > 0) {
+                textAlign(CENTER, TOP);
+                textStyle(BOLD);
+                textSize(32);
+                fill(100, 200, 255, 180);
+                text("SOULS SAVED: " + totalSoulsBanked, width / 2, height / 2 - 120);
+            }
+
+            // Draw Buttons
+            let by = height - 100;
+            btnFeed.x = width / 2 - 170;
+            btnFeed.y = by;
+            btnFlee.x = width / 2 + 20;
+            btnFlee.y = by;
+
+            let mx = mouseX;
+            let my = mouseY;
+
+            // Feed Button
+            let feedText = gameState === 'FEEDING' ? "FEED TRIBUTE" : "APPROACH";
+            let hoverFeed = mx > btnFeed.x && mx < btnFeed.x + btnFeed.w && my > btnFeed.y && my < btnFeed.y + btnFeed.h;
+
+            noStroke();
+            fill(hoverFeed ? 60 : 30);
+            rect(btnFeed.x, btnFeed.y, btnFeed.w, btnFeed.h, 5);
+
+            fill(gameState === 'CONSUMED' ? 100 : 255);
+            textSize(16);
+            textAlign(CENTER, CENTER);
+            text(feedText, btnFeed.x + btnFeed.w / 2, btnFeed.y + btnFeed.h / 2);
+
+            // Flee Button
+            let fleeDisabled = (gameState !== 'FEEDING' || consumedItems.length === 0);
+            let hoverFlee = !fleeDisabled && mx > btnFlee.x && mx < btnFlee.x + btnFlee.w && my > btnFlee.y && my < btnFlee.y + btnFlee.h;
+
+            fill(fleeDisabled ? 20 : (hoverFlee ? 60 : 30));
+            rect(btnFlee.x, btnFlee.y, btnFlee.w, btnFlee.h, 5);
+
+            fill(fleeDisabled ? 100 : 255);
+            text("FLEE", btnFlee.x + btnFlee.w / 2, btnFlee.y + btnFlee.h / 2);
+        }
+
+        function mousePressed() {
+            let mx = mouseX;
+            let my = mouseY;
+
+            // Feed Click
+            if (mx > btnFeed.x && mx < btnFeed.x + btnFeed.w && my > btnFeed.y && my < btnFeed.y + btnFeed.h) {
+                if (gameState === 'IDLE' || gameState === 'CONSUMED' || gameState === 'ESCAPED') {
+                    initializeSystem();
+                } else {
+                    feedBeast();
+                }
+            }
+
+            // Flee Click
+            let fleeDisabled = (gameState !== 'FEEDING' || consumedItems.length === 0);
+            if (!fleeDisabled && mx > btnFlee.x && mx < btnFlee.x + btnFlee.w && my > btnFlee.y && my < btnFlee.y + btnFlee.h) {
+                fleeAndBank();
+            }
+        }
+    </script>
+</body>
+</html>
